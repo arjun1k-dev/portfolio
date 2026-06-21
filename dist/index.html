@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ARJUN1K</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Noto+Sans+Devanagari:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      background: #0a0014;
+      color: #fff;
+      font-family: 'Share Tech Mono', monospace;
+      cursor: default;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #app { position: fixed; inset: 0; }
+    canvas { display: block; }
+
+    /* === Click-to-play overlay === */
+    #intro {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: radial-gradient(circle at center, rgba(20,0,40,0.85) 0%, rgba(0,0,0,0.95) 100%);
+      z-index: 100;
+      cursor: pointer;
+      transition: opacity 0.4s ease;
+    }
+    #intro.hidden { opacity: 0; pointer-events: none; }
+    #intro h1 {
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 900;
+      font-size: clamp(2rem, 6vw, 4.5rem);
+      letter-spacing: 0.2em;
+      color: #ff2bd6;
+      text-shadow:
+        0 0 10px #ff2bd6,
+        0 0 25px #ff2bd6,
+        2px 0 0 #00f0ff,
+        -2px 0 0 #ff2bd6;
+      margin-bottom: 1rem;
+      animation: glitch 2.5s infinite;
+    }
+    #intro p {
+      font-size: clamp(0.85rem, 1.5vw, 1.05rem);
+      color: #9ad7ff;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 2rem;
+      opacity: 0.85;
+    }
+    #intro .cta {
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 700;
+      font-size: clamp(0.85rem, 1.4vw, 1.05rem);
+      color: #0a0014;
+      background: #00f0ff;
+      padding: 0.85rem 2.5rem;
+      border: 2px solid #00f0ff;
+      box-shadow: 0 0 20px #00f0ff, inset 0 0 10px rgba(255,255,255,0.4);
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    #intro .controls-hint {
+      margin-top: 2.5rem;
+      display: grid;
+      grid-template-columns: auto auto;
+      gap: 0.5rem 1.2rem;
+      font-size: 0.8rem;
+      color: #6b7a99;
+      letter-spacing: 0.1em;
+    }
+    #intro .controls-hint .key {
+      color: #ff2bd6;
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 700;
+      text-align: right;
+    }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 20px #00f0ff, inset 0 0 10px rgba(255,255,255,0.4); transform: scale(1); }
+      50% { box-shadow: 0 0 35px #00f0ff, inset 0 0 15px rgba(255,255,255,0.6); transform: scale(1.03); }
+    }
+    @keyframes glitch {
+      0%, 95%, 100% { transform: translate(0,0); }
+      96% { transform: translate(-2px, 1px); }
+      97% { transform: translate(2px, -1px); }
+      98% { transform: translate(-1px, -2px); }
+      99% { transform: translate(1px, 2px); }
+    }
+
+    /* === Boundary overlay === */
+    #boundary {
+      position: fixed; inset: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center; justify-content: center;
+      background: rgba(5, 0, 15, 0.88);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 200;
+    }
+    #boundary.visible { display: flex; animation: glitch-in 0.4s; }
+    #boundary .panel {
+      max-width: 580px;
+      padding: 2.5rem 3rem;
+      background: linear-gradient(135deg, rgba(20,0,40,0.9), rgba(40,0,60,0.7));
+      border: 1px solid #ff2bd6;
+      box-shadow:
+        0 0 30px rgba(255,43,214,0.5),
+        inset 0 0 20px rgba(255,43,214,0.1);
+      text-align: center;
+      position: relative;
+    }
+    #boundary .panel::before {
+      content: '';
+      position: absolute;
+      top: -1px; left: -1px; right: -1px; height: 6px;
+      background: repeating-linear-gradient(
+        90deg,
+        #00f0ff 0 8px,
+        transparent 8px 16px
+      );
+    }
+    #boundary h2 {
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 900;
+      font-size: 1.5rem;
+      letter-spacing: 0.15em;
+      color: #00f0ff;
+      text-shadow: 0 0 12px #00f0ff;
+      margin-bottom: 1.5rem;
+    }
+    #boundary p {
+      color: #c8b8e0;
+      font-size: 0.95rem;
+      line-height: 1.7;
+      margin-bottom: 1.8rem;
+      letter-spacing: 0.04em;
+    }
+    #boundary .btn {
+      display: inline-block;
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 700;
+      font-size: 0.85rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      text-decoration: none;
+      color: #0a0014;
+      background: #ff2bd6;
+      padding: 0.85rem 2rem;
+      box-shadow: 0 0 18px #ff2bd6;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    #boundary .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 30px #ff2bd6;
+    }
+    #boundary .dismiss {
+      display: block;
+      margin-top: 1.5rem;
+      font-size: 0.75rem;
+      color: #6b7a99;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    @keyframes glitch-in {
+      0% { opacity: 0; transform: scale(0.9); filter: hue-rotate(90deg); }
+      100% { opacity: 1; transform: scale(1); filter: hue-rotate(0); }
+    }
+
+    /* === HUD crosshair === */
+    #crosshair {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      z-index: 50;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    #crosshair.visible { opacity: 0.6; }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute;
+      background: #00f0ff;
+      box-shadow: 0 0 4px #00f0ff;
+    }
+    #crosshair::before { top: -8px; left: -1px; width: 2px; height: 16px; }
+    #crosshair::after { top: -1px; left: -8px; width: 16px; height: 2px; }
+
+    /* === HUD status bar (top-left) === */
+    #hud {
+      position: fixed; top: 1rem; left: 1rem;
+      z-index: 50;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.75rem;
+      color: #6b7a99;
+      letter-spacing: 0.1em;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    #hud.visible { opacity: 0.9; }
+    #hud .line { margin-bottom: 0.2rem; }
+    #hud .label { color: #ff2bd6; }
+    #hud .val { color: #9ad7ff; }
+
+    /* === Loading === */
+    #loader {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: #0a0014;
+      z-index: 300;
+      transition: opacity 0.6s;
+    }
+    #loader.hidden { opacity: 0; pointer-events: none; }
+    #loader .spinner {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.9rem;
+      color: #00f0ff;
+      letter-spacing: 0.3em;
+      text-shadow: 0 0 10px #00f0ff;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0.3; } }
+
+    /* === Audio toggle (bottom-right) === */
+    #audio-btn {
+      position: fixed; bottom: 1rem; right: 1rem;
+      z-index: 70;
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 700;
+      font-size: 0.7rem;
+      letter-spacing: 0.2em;
+      color: #6b7a99;
+      background: rgba(10,0,20,0.8);
+      border: 1px solid #2a1040;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      opacity: 0;
+      pointer-events: none;
+    }
+    #audio-btn.visible { opacity: 1; pointer-events: auto; }
+    #audio-btn:hover { color: #00f0ff; border-color: #00f0ff; }
+    #audio-btn.on {
+      color: #00f0ff;
+      border-color: #00f0ff;
+      box-shadow: 0 0 10px rgba(0,240,255,0.5);
+    }
+
+    /* === Skill overlay (appears near skill pillars) === */
+    #skill-overlay {
+      position: fixed; left: 50%; bottom: 3rem;
+      transform: translateX(-50%);
+      z-index: 80;
+      min-width: 280px;
+      padding: 1.2rem 1.8rem;
+      background: linear-gradient(135deg, rgba(10,0,25,0.95), rgba(30,5,50,0.9));
+      border: 1px solid #ff2bd6;
+      box-shadow: 0 0 25px rgba(255,43,214,0.4), inset 0 0 12px rgba(255,43,214,0.08);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s, transform 0.25s;
+      backdrop-filter: blur(4px);
+    }
+    #skill-overlay.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    #skill-overlay .skill-title {
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 900;
+      font-size: 1.3rem;
+      letter-spacing: 0.2em;
+      margin-bottom: 0.7rem;
+      text-align: center;
+    }
+    #skill-overlay .skill-list {
+      list-style: none;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.35rem 1.2rem;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.85rem;
+      color: #c8b8e0;
+      letter-spacing: 0.08em;
+    }
+    #skill-overlay .skill-list li::before {
+      content: '> ';
+      color: #ff2bd6;
+    }
+    #skill-overlay .hint {
+      margin-top: 0.8rem;
+      text-align: center;
+      font-size: 0.7rem;
+      color: #6b7a99;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+
+    /* === Contact overlay (appears near contact kiosk) === */
+    #contact-overlay {
+      position: fixed; left: 50%; top: 50%;
+      transform: translate(-50%, -50%) scale(0.95);
+      z-index: 90;
+      width: min(90vw, 480px);
+      padding: 2rem 2.5rem;
+      background: linear-gradient(135deg, rgba(10,0,25,0.96), rgba(20,5,45,0.92));
+      border: 1px solid #00f0ff;
+      box-shadow: 0 0 30px rgba(0,240,255,0.5), inset 0 0 15px rgba(0,240,255,0.08);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s, transform 0.25s;
+      backdrop-filter: blur(6px);
+      display: block;
+    }
+    #contact-overlay.visible {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+    #contact-overlay h2 {
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 900;
+      font-size: 1.5rem;
+      letter-spacing: 0.18em;
+      color: #00f0ff;
+      text-shadow: 0 0 12px #00f0ff;
+      text-align: center;
+      margin-bottom: 1.2rem;
+      grid-column: 1 / -1;
+      width: 100%;
+      display: block;
+    }
+    #contact-overlay .contact-details {
+      display: block;
+      width: 100%;
+    }
+    #contact-overlay .info-row {
+      display: grid !important;
+      grid-template-columns: 90px 1fr !important;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 0.8rem;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.85rem;
+      width: 100%;
+    }
+    #contact-overlay .info-row .label {
+      color: #ff2bd6;
+      letter-spacing: 0.1em;
+    }
+    #contact-overlay .info-row .val {
+      color: #9ad7ff;
+      word-break: break-all;
+    }
+    #contact-overlay a.val {
+      color: #9ad7ff;
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    #contact-overlay a.val:hover { color: #00f0ff; text-shadow: 0 0 6px #00f0ff; }
+    #contact-overlay .hint {
+      margin-top: 1.2rem;
+      text-align: center;
+      font-size: 0.7rem;
+      color: #6b7a99;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+  </style>
+  <script type="module" crossorigin src="/portfolio/assets/index-CEe-pytA.js"></script>
+  <link rel="stylesheet" crossorigin href="/portfolio/assets/index-DRYh8PAJ.css">
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="loader">
+    <div class="spinner">INITIALIZING...</div>
+  </div>
+
+  <div id="intro">
+    <h1>ARJUN1K</h1>
+    <p>Portfolio // Demo Build</p>
+    <div class="cta">CLICK TO ENTER</div>
+    <div class="controls-hint">
+      <span class="key">WASD</span><span>Move</span>
+      <span class="key">MOUSE</span><span>Look</span>
+      <span class="key">SHIFT</span><span>Sprint</span>
+      <span class="key">ESC</span><span>Release cursor</span>
+      <span class="key">EXPLORE</span><span>4 skill pillars + contact kiosk near plaza</span>
+    </div>
+  </div>
+
+  <div id="crosshair"></div>
+
+  <div id="hud">
+    <div class="line"><span class="label">POS</span> <span class="val" id="hud-pos">0,0</span></div>
+    <div class="line"><span class="label">SPD</span> <span class="val" id="hud-spd">WALK</span></div>
+    <div class="line"><span class="label">FPS</span> <span class="val" id="hud-fps">--</span></div>
+  </div>
+
+  <div id="boundary">
+    <div class="panel">
+      <h2>BOUNDARY REACHED</h2>
+      <p>
+        You have hit the edge of the demo chunk.<br><br>
+        To explore the full environment with dynamic lighting,
+        native physics, and the expanded city grid,
+        execute the native client.
+      </p>
+      <a class="btn" href="https://github.com/arjun1k-dev" target="_blank" rel="noopener">Download Native Client</a>
+      <span class="dismiss" id="dismiss-boundary">Return to demo</span>
+    </div>
+  </div>
+
+  <!-- Audio toggle button -->
+  <button id="audio-btn">AUDIO: OFF</button>
+
+  <!-- Skill overlay (appears when near a skill pillar) -->
+  <div id="skill-overlay">
+    <div class="skill-title">CODE</div>
+    <ul class="skill-list"></ul>
+    <div class="hint">Walk away to dismiss</div>
+  </div>
+
+  <!-- Contact overlay (appears when near the contact kiosk) -->
+  <div id="contact-overlay">
+    <h2>CONTACT</h2>
+    <div class="contact-details">
+      <div class="info-row">
+        <span class="label">NAME</span>
+        <span class="val contact-name"></span>
+      </div>
+      <div class="info-row">
+        <span class="label">AGE</span>
+        <span class="val contact-age"></span>
+      </div>
+      <div class="info-row">
+        <span class="label">COLLEGE</span>
+        <span class="val contact-college"></span>
+      </div>
+      <div class="info-row">
+        <span class="label">ROLE</span>
+        <span class="val contact-role"></span>
+      </div>
+      <div class="info-row">
+        <span class="label">GITHUB</span>
+        <a class="val contact-github" href="#" target="_blank" rel="noopener"></a>
+      </div>
+      <div class="info-row">
+        <span class="label">EMAIL</span>
+        <a class="val contact-email" href="#"></a>
+      </div>
+      <div class="info-row">
+        <span class="label">LINKEDIN</span>
+        <a class="val contact-linkedin" href="#" target="_blank" rel="noopener"></a>
+      </div>
+    </div>
+    <div class="hint">Walk away to dismiss</div>
+  </div>
+
+</body>
+</html>
