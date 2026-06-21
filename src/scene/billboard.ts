@@ -1,314 +1,287 @@
+// Builds the billboard: a tall plane mounted at the north edge of the chunk.
+// The texture is composed on a 2D canvas (pfp image + Devanagari shloka + name + info),
+// then driven through a custom glitch shader material.
+
 import * as THREE from 'three';
-import { matBuilding, matBillboardFrame, matBillboardBack } from '../materials';
-import { CITY_SIZE } from '../config';
+import { glitchVertex, glitchFragment } from '../effects/glitch';
 
-const BILLBOARD_WIDTH = 10;
-const BILLBOARD_HEIGHT = 18;
-const PFP_SECTION_HEIGHT = 9.5;
-const INFO_SECTION_HEIGHT = 7.5;
+const SHLOKA_LINE1 = 'यत्र योगेश्वरः कृष्णो यत्र पार्थो धनुर्धरः ।';
+const SHLOKA_LINE2 = 'तत्र श्रीर्विजयो भूतिर्ध्रुवा नीतिर्मतिर्मम ॥';
 
-// ─── Shared glitch shader ───
-
-const VERTEX_SHADER = `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const FRAGMENT_SHADER = `
-  uniform sampler2D uTexture;
-  uniform float uTime;
-  uniform float uGlitchIntensity;
-  varying vec2 vUv;
-
-  float random(vec2 st) {
-    return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
-  }
-
-  void main() {
-    vec2 uv = vUv;
-
-    // Random glitch trigger
-    float glitchTrigger = step(0.95, random(vec2(uTime * 2.0, floor(uTime * 15.0))));
-    float glitchStrength = glitchTrigger * uGlitchIntensity;
-
-    // RGB split
-    float split = 0.005 + glitchStrength * 0.03;
-    float r = texture2D(uTexture, uv + vec2(split, 0.0)).r;
-    float g = texture2D(uTexture, uv).g;
-    float b = texture2D(uTexture, uv - vec2(split, 0.0)).b;
-
-    // Scanline effect
-    float scanline = sin(uv.y * 400.0 + uTime * 3.0) * 0.08;
-
-    // Horizontal glitch bands
-    float band = step(0.99, random(vec2(floor(uv.y * 60.0), uTime * 2.0)));
-    uv.x += band * glitchStrength * (random(vec2(uTime, uv.y)) - 0.5) * 0.15;
-
-    // Noise
-    float noise = step(0.998, random(vec2(uTime * 5.0, uv.x + uv.y)));
-
-    // Color shift on glitch
-    vec3 color = vec3(r, g, b);
-    if (glitchTrigger > 0.5) {
-      color.g += 0.1;
-      color.b += 0.2;
-    }
-
-    color += scanline;
-    color += noise * 0.5;
-
-    // Vignette
-    float dist = distance(uv, vec2(0.5));
-    color *= 1.0 - dist * 0.5;
-
-    gl_FragColor = vec4(color, 1.0);
-  }
-`;
-
-export interface BillboardRefs {
-  pfpMaterial: THREE.ShaderMaterial;
-  infoMaterial: THREE.ShaderMaterial;
+export interface BillboardInfo {
+  name: string;
+  age: number;
+  college: string;
+  role: string;
+  github: string;
 }
 
-export function createBillboard(scene: THREE.Scene): BillboardRefs {
-  const billX = 0;
-  const billZ = -CITY_SIZE / 2 + 4;
-
-  // ─── Support structure ───
-
-  const poleGeo = new THREE.BoxGeometry(0.4, BILLBOARD_HEIGHT + 2, 0.4);
-  const poleL = new THREE.Mesh(poleGeo, matBuilding);
-  poleL.position.set(billX - BILLBOARD_WIDTH / 2 + 0.4, (BILLBOARD_HEIGHT + 2) / 2, billZ);
-  scene.add(poleL);
-
-  const poleR = poleL.clone();
-  poleR.position.x = billX + BILLBOARD_WIDTH / 2 - 0.4;
-  scene.add(poleR);
-
-  // Main frame
-  const frame = new THREE.Mesh(
-    new THREE.BoxGeometry(BILLBOARD_WIDTH + 0.5, BILLBOARD_HEIGHT + 0.5, 0.2),
-    matBillboardFrame
-  );
-  frame.position.set(billX, BILLBOARD_HEIGHT / 2 + 0.8, billZ);
-  scene.add(frame);
-
-  // Back panel
-  const back = new THREE.Mesh(
-    new THREE.PlaneGeometry(BILLBOARD_WIDTH, BILLBOARD_HEIGHT),
-    matBillboardBack
-  );
-  back.position.set(billX, BILLBOARD_HEIGHT / 2 + 0.8, billZ - 0.1);
-  scene.add(back);
-
-  // ─── PFP Section (top) ───
-
-  const textureLoader = new THREE.TextureLoader();
-  const pfpTexture = textureLoader.load('/pfp.webp', (tex) => {
-    tex.minFilter = THREE.LinearFilter;
-    tex.magFilter = THREE.LinearFilter;
-  });
-
-  const pfpShaderMat = new THREE.ShaderMaterial({
-    uniforms: {
-      uTexture: { value: pfpTexture },
-      uTime: { value: 0 },
-      uGlitchIntensity: { value: 0.6 },
-    },
-    vertexShader: VERTEX_SHADER,
-    fragmentShader: FRAGMENT_SHADER,
-  });
-
-  // PFP is square (1024x1024), so fit it within the section
-  const pfpSize = PFP_SECTION_HEIGHT - 0.1;
-  const pfpSurface = new THREE.Mesh(
-    new THREE.PlaneGeometry(pfpSize, pfpSize),
-    pfpShaderMat
-  );
-  pfpSurface.position.set(billX, BILLBOARD_HEIGHT - PFP_SECTION_HEIGHT / 2 + 0.65, billZ + 0.1);
-  scene.add(pfpSurface);
-
-  // ─── Info Section (bottom) ───
-
-  const infoCanvas = createInfoCanvas();
-  const infoTexture = new THREE.CanvasTexture(infoCanvas);
-  infoTexture.minFilter = THREE.LinearFilter;
-  infoTexture.magFilter = THREE.LinearFilter;
-
-  const infoShaderMat = new THREE.ShaderMaterial({
-    uniforms: {
-      uTexture: { value: infoTexture },
-      uTime: { value: 0 },
-      uGlitchIntensity: { value: 0.4 },
-    },
-    vertexShader: VERTEX_SHADER,
-    fragmentShader: FRAGMENT_SHADER,
-  });
-
-  const infoSurface = new THREE.Mesh(
-    new THREE.PlaneGeometry(BILLBOARD_WIDTH - 0.5, INFO_SECTION_HEIGHT),
-    infoShaderMat
-  );
-  infoSurface.position.set(billX, INFO_SECTION_HEIGHT / 2, billZ + 0.1);
-  scene.add(infoSurface);
-
-  // ─── Neon border (entire billboard) ───
-
-  const borderPts = [
-    new THREE.Vector3(-BILLBOARD_WIDTH / 2, -BILLBOARD_HEIGHT / 2, 0),
-    new THREE.Vector3(BILLBOARD_WIDTH / 2, -BILLBOARD_HEIGHT / 2, 0),
-    new THREE.Vector3(BILLBOARD_WIDTH / 2, BILLBOARD_HEIGHT / 2, 0),
-    new THREE.Vector3(-BILLBOARD_WIDTH / 2, BILLBOARD_HEIGHT / 2, 0),
-    new THREE.Vector3(-BILLBOARD_WIDTH / 2, -BILLBOARD_HEIGHT / 2, 0),
-  ];
-  const border = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(borderPts),
-    new THREE.LineBasicMaterial({ color: 0x00ffff })
-  );
-  border.position.set(billX, BILLBOARD_HEIGHT / 2 + 0.8, billZ + 0.12);
-  scene.add(border);
-
-  // Section divider line
-  const dividerPts = [
-    new THREE.Vector3(-BILLBOARD_WIDTH / 2 + 0.25, 0, 0),
-    new THREE.Vector3(BILLBOARD_WIDTH / 2 - 0.25, 0, 0),
-  ];
-  const divider = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(dividerPts),
-    new THREE.LineBasicMaterial({ color: 0xff00ff })
-  );
-  divider.position.set(billX, BILLBOARD_HEIGHT - PFP_SECTION_HEIGHT + 0.4, billZ + 0.13);
-  scene.add(divider);
-
-  return { pfpMaterial: pfpShaderMat, infoMaterial: infoShaderMat };
+interface BuildResult {
+  group: THREE.Group;
+  material: THREE.ShaderMaterial;
+  texture: THREE.CanvasTexture;
+  /** AABB in world space used for collision. */
+  collider: { min: THREE.Vector2; max: THREE.Vector2 };
 }
 
-// ─── Info Canvas Creation ───
+const TEX_W = 1024;
+const TEX_H = 1536; // portrait 2:3 — tall enough to hold image + shloka + info
 
-function createInfoCanvas(): HTMLCanvasElement {
+function drawRoundedRect(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number, r: number
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+export async function buildBillboard(info: BillboardInfo): Promise<BuildResult> {
+  // Wait for fonts so Devanagari renders correctly on the canvas.
+  if (document.fonts && document.fonts.ready) {
+    try { await document.fonts.ready; } catch { /* ignore */ }
+  }
+
   const canvas = document.createElement('canvas');
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = 1024 * dpr;
-  canvas.height = 750 * dpr;
+  canvas.width = TEX_W;
+  canvas.height = TEX_H;
   const ctx = canvas.getContext('2d')!;
 
-  // Scale context for retina displays
-  ctx.scale(dpr, dpr);
+  // --- Background ---
+  const bg = ctx.createLinearGradient(0, 0, 0, TEX_H);
+  bg.addColorStop(0, '#0a0218');
+  bg.addColorStop(0.5, '#1a0432');
+  bg.addColorStop(1, '#0a0218');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, TEX_W, TEX_H);
 
-  // Background
-  const gradient = ctx.createLinearGradient(0, 0, 0, 750);
-  gradient.addColorStop(0, '#0a0a15');
-  gradient.addColorStop(1, '#151025');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 1024, 750);
-
-  // Grid pattern overlay
-  ctx.strokeStyle = 'rgba(0, 255, 255, 0.1)';
+  // Subtle grid background
+  ctx.strokeStyle = 'rgba(255,43,214,0.08)';
   ctx.lineWidth = 1;
-  for (let i = 0; i < 1024; i += 40) {
-    ctx.beginPath();
-    ctx.moveTo(i, 0);
-    ctx.lineTo(i, 750);
-    ctx.stroke();
+  for (let x = 0; x <= TEX_W; x += 32) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, TEX_H); ctx.stroke();
   }
-  for (let i = 0; i < 750; i += 40) {
-    ctx.beginPath();
-    ctx.moveTo(0, i);
-    ctx.lineTo(1024, i);
-    ctx.stroke();
+  for (let y = 0; y <= TEX_H; y += 32) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(TEX_W, y); ctx.stroke();
   }
 
-  // Name - ARJUN1K (much larger)
-  ctx.fillStyle = '#00ffff';
-  ctx.font = 'bold 120px "Courier New", monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
-  // Glow effect for name
-  ctx.shadowColor = '#00ffff';
-  ctx.shadowBlur = 30;
-  ctx.fillText('ARJUN1K', 512, 190);
+  // Outer neon border
+  ctx.strokeStyle = '#00f0ff';
+  ctx.lineWidth = 6;
+  ctx.shadowColor = '#00f0ff';
+  ctx.shadowBlur = 20;
+  ctx.strokeRect(12, 12, TEX_W - 24, TEX_H - 24);
   ctx.shadowBlur = 0;
 
-  // Decorative lines
-  ctx.strokeStyle = '#ff00ff';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(240, 240);
-  ctx.lineTo(410, 240);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(614, 240);
-  ctx.lineTo(784, 240);
-  ctx.stroke();
-
-  // Age (much larger)
-  ctx.fillStyle = '#ff00ff';
-  ctx.font = 'bold 62px "Courier New", monospace';
-  ctx.shadowColor = '#ff00ff';
-  ctx.shadowBlur = 15;
-  ctx.fillText('AGE: 19', 512, 310);
-  ctx.shadowBlur = 0;
-
-  // College (much larger)
-  ctx.fillStyle = '#00ff88';
-  ctx.font = '48px "Courier New", monospace';
-  ctx.shadowColor = '#00ff88';
+  // Corner accent marks
+  ctx.strokeStyle = '#ff2bd6';
+  ctx.lineWidth = 4;
+  ctx.shadowColor = '#ff2bd6';
   ctx.shadowBlur = 12;
-
-  const collegeText = 'COEP Technological University';
-  ctx.fillText(collegeText, 512, 390);
+  const cornerLen = 80;
+  // top-left
+  ctx.beginPath(); ctx.moveTo(30, 30 + cornerLen); ctx.lineTo(30, 30); ctx.lineTo(30 + cornerLen, 30); ctx.stroke();
+  // top-right
+  ctx.beginPath(); ctx.moveTo(TEX_W - 30 - cornerLen, 30); ctx.lineTo(TEX_W - 30, 30); ctx.lineTo(TEX_W - 30, 30 + cornerLen); ctx.stroke();
+  // bottom-left
+  ctx.beginPath(); ctx.moveTo(30, TEX_H - 30 - cornerLen); ctx.lineTo(30, TEX_H - 30); ctx.lineTo(30 + cornerLen, TEX_H - 30); ctx.stroke();
+  // bottom-right
+  ctx.beginPath(); ctx.moveTo(TEX_W - 30 - cornerLen, TEX_H - 30); ctx.lineTo(TEX_W - 30, TEX_H - 30); ctx.lineTo(TEX_W - 30, TEX_H - 30 - cornerLen); ctx.stroke();
   ctx.shadowBlur = 0;
 
-  // Sanskrit Shloka (MUCH LARGER for readability)
-  ctx.fillStyle = '#ffcc00';
-  ctx.font = 'bold 40px "Courier New", monospace';
-  ctx.shadowColor = '#ffcc00';
-  ctx.shadowBlur = 10;
-  
-  const shloka = 'यत्र योगेश्वरः कृष्णो यत्र पार्थो धनुर्धरः।';
-  const shloka2 = 'तत्र श्रीर्विजयो भूतिर्ध्रुवा नीतिर्मतिर्मम॥';
-  
-  ctx.fillText(shloka, 512, 470);
-  ctx.fillText(shloka2, 512, 530);
+  // --- Profile image (loaded async) ---
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.src = '/pfp.webp';
+  await new Promise<void>((res) => {
+    img.onload = () => res();
+    img.onerror = () => res();
+  });
+
+  const imgSize = 620;
+  const imgX = (TEX_W - imgSize) / 2;
+  const imgY = 80;
+
+  // Image glow background
+  const imgGrad = ctx.createRadialGradient(
+      TEX_W / 2, imgY + imgSize / 2, imgSize * 0.3,
+      TEX_W / 2, imgY + imgSize / 2, imgSize * 0.75
+  );
+  imgGrad.addColorStop(0, 'rgba(255,43,214,0.35)');
+  imgGrad.addColorStop(1, 'rgba(255,43,214,0)');
+  ctx.fillStyle = imgGrad;
+  ctx.fillRect(imgX - 80, imgY - 80, imgSize + 160, imgSize + 160);
+
+  // Image frame
+  ctx.save();
+  drawRoundedRect(ctx, imgX - 8, imgY - 8, imgSize + 16, imgSize + 16, 16);
+  ctx.fillStyle = '#000';
+  ctx.fill();
+  ctx.clip();
+
+  if (img.complete && img.naturalWidth > 0) {
+    ctx.drawImage(img, imgX, imgY, imgSize, imgSize);
+  } else {
+    // Fallback: placeholder block
+    ctx.fillStyle = '#1a0432';
+    ctx.fillRect(imgX, imgY, imgSize, imgSize);
+    ctx.fillStyle = '#ff2bd6';
+    ctx.font = 'bold 48px Orbitron, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('NO SIGNAL', TEX_W / 2, imgY + imgSize / 2);
+  }
+  ctx.restore();
+
+  // Image border
+  ctx.strokeStyle = '#ff2bd6';
+  ctx.lineWidth = 4;
+  ctx.shadowColor = '#ff2bd6';
+  ctx.shadowBlur = 18;
+  drawRoundedRect(ctx, imgX - 8, imgY - 8, imgSize + 16, imgSize + 16, 16);
+  ctx.stroke();
   ctx.shadowBlur = 0;
 
-  // Decorative corner brackets
-  ctx.strokeStyle = '#4466ff';
-  ctx.lineWidth = 3;
-  const cornerSize = 20;
-  const margin = 30;
+  // --- Devanagari shloka (below image) ---
+  let y = imgY + imgSize + 60;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff4d0';
+  ctx.shadowColor = '#ffb84d';
+  ctx.shadowBlur = 8;
+  ctx.font = '700 42px "Noto Sans Devanagari", serif';
+  ctx.fillText(SHLOKA_LINE1, TEX_W / 2, y);
+  y += 56;
+  ctx.fillText(SHLOKA_LINE2, TEX_W / 2, y);
+  ctx.shadowBlur = 0;
+  y += 70;
 
-  // Top-left
+  // Divider
+  ctx.strokeStyle = 'rgba(0,240,255,0.5)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(margin, margin + cornerSize);
-  ctx.lineTo(margin, margin);
-  ctx.lineTo(margin + cornerSize, margin);
+  ctx.moveTo(TEX_W * 0.2, y); ctx.lineTo(TEX_W * 0.8, y);
   ctx.stroke();
+  y += 60;
 
-  // Top-right
-  ctx.beginPath();
-  ctx.moveTo(1024 - margin - cornerSize, margin);
-  ctx.lineTo(1024 - margin, margin);
-  ctx.lineTo(1024 - margin, margin + cornerSize);
-  ctx.stroke();
+  // --- Name (huge, neon) ---
+  ctx.fillStyle = '#00f0ff';
+  ctx.shadowColor = '#00f0ff';
+  ctx.shadowBlur = 25;
+  ctx.font = '900 110px Orbitron, sans-serif';
+  ctx.fillText(info.name, TEX_W / 2, y + 30);
+  ctx.shadowBlur = 0;
+  // Pink offset shadow for chromatic effect
+  ctx.fillStyle = 'rgba(255,43,214,0.6)';
+  ctx.fillText(info.name, TEX_W / 2 + 3, y + 30);
+  ctx.fillStyle = '#00f0ff';
+  ctx.fillText(info.name, TEX_W / 2, y + 30);
+  y += 160;
 
-  // Bottom-left
-  ctx.beginPath();
-  ctx.moveTo(margin, 750 - margin - cornerSize);
-  ctx.lineTo(margin, 750 - margin);
-  ctx.lineTo(margin + cornerSize, 750 - margin);
-  ctx.stroke();
+  // --- Info rows (monospace) ---
+  const rows: Array<[string, string]> = [
+    ['AGE',     String(info.age)],
+    ['COLLEGE', info.college],
+    ['ROLE',    info.role.toUpperCase()],
+    ['GITHUB',  info.github],
+  ];
 
-  // Bottom-right
-  ctx.beginPath();
-  ctx.moveTo(1024 - margin - cornerSize, 750 - margin);
-  ctx.lineTo(1024 - margin, 750 - margin);
-  ctx.lineTo(1024 - margin, 750 - margin - cornerSize);
-  ctx.stroke();
+  ctx.font = '34px "Share Tech Mono", monospace';
+  const rowH = 56;
+  const labelX = TEX_W * 0.18;
+  const valX   = TEX_W * 0.40;
 
-  return canvas;
+  for (const [label, val] of rows) {
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ff2bd6';
+    ctx.fillText(label, labelX, y);
+    ctx.fillStyle = '#9ad7ff';
+    // Truncate long values
+    const maxValWidth = TEX_W * 0.42;
+    let displayVal = val;
+    while (ctx.measureText(displayVal).width > maxValWidth && displayVal.length > 1) {
+      displayVal = displayVal.slice(0, -1);
+    }
+    if (displayVal !== val) displayVal = displayVal.slice(0, -1) + '…';
+    ctx.fillText(displayVal, valX, y);
+    y += rowH;
+  }
+
+  // --- Bottom decorative bar ---
+  ctx.fillStyle = '#00f0ff';
+  ctx.shadowColor = '#00f0ff';
+  ctx.shadowBlur = 12;
+  ctx.font = '28px "Share Tech Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('// END OF TRANSMISSION //', TEX_W / 2, TEX_H - 50);
+  ctx.shadowBlur = 0;
+
+  // --- Top header strip ---
+  ctx.fillStyle = 'rgba(255,43,214,0.9)';
+  ctx.fillRect(40, 40, 200, 4);
+  ctx.fillRect(TEX_W - 240, 40, 200, 4);
+  ctx.fillStyle = '#ff2bd6';
+  ctx.font = '24px "Share Tech Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('PROFILE.dat', TEX_W / 2, 50);
+
+  // --- Three.js setup ---
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+
+  const material = new THREE.ShaderMaterial({
+    vertexShader: glitchVertex,
+    fragmentShader: glitchFragment,
+    transparent: true,
+    uniforms: {
+      uTexture:       { value: texture },
+      uTime:          { value: 0 },
+      uResolution:    { value: new THREE.Vector2(TEX_W, TEX_H) },
+      uGlitchStrength:{ value: 0.55 },
+    },
+  });
+
+  // World dimensions. The billboard sits on the north edge of the chunk.
+  // Aspect 2:3, height = 12 units (taller than most buildings, but shorter
+  // than the surrounding skyscrapers which average 14-18).
+  const height = 12;
+  const width  = height * (TEX_W / TEX_H); // ~8 units wide
+  const group = new THREE.Group();
+
+  const planeGeo = new THREE.PlaneGeometry(width, height);
+  const plane = new THREE.Mesh(planeGeo, material);
+  plane.position.set(0, height / 2 + 0.05, 0); // sit just above the floor
+  group.add(plane);
+
+  // Backing panel (so the billboard has a solid frame from behind)
+  const backingGeo = new THREE.BoxGeometry(width + 0.4, height + 0.4, 0.2);
+  const backingMat = new THREE.MeshBasicMaterial({ color: 0x08010f });
+  const backing = new THREE.Mesh(backingGeo, backingMat);
+  backing.position.set(0, height / 2 + 0.05, -0.15);
+  group.add(backing);
+
+  // Support struts (two thin vertical posts going up from ground)
+  const strutMat = new THREE.MeshBasicMaterial({ color: 0x2a1040 });
+  const strutGeo = new THREE.BoxGeometry(0.15, height + 0.1, 0.15);
+  const strutL = new THREE.Mesh(strutGeo, strutMat);
+  strutL.position.set(-width / 2 + 0.3, (height + 0.1) / 2, -0.2);
+  group.add(strutL);
+  const strutR = new THREE.Mesh(strutGeo, strutMat);
+  strutR.position.set(width / 2 - 0.3, (height + 0.1) / 2, -0.2);
+  group.add(strutR);
+
+  // The collider is the backing panel footprint (x/z range) so the player
+  // can't walk through the billboard.
+  const collider = {
+    min: new THREE.Vector2(-width / 2 - 0.2, -0.3),
+    max: new THREE.Vector2( width / 2 + 0.2,  0.3),
+  };
+
+  return { group, material, texture, collider };
 }

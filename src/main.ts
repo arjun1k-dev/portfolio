@@ -1,300 +1,263 @@
+// Entry point. Sets up renderer, scene, controls, animation loop.
+// Wires: scene + billboard + notice boards + rain + lamp flicker +
+//        holographic ads + distant skyline + skill pillars + contact kiosk +
+//        minimap + audio. Zero-alloc in the hot loop.
+
+import './style.css';
 import * as THREE from 'three';
-import {
-    CITY_SIZE,
-    BOUNDARY_MARGIN,
-    PLAYER_RADIUS,
-} from './config';
-import { createFloor } from './scene/floor';
-import { createCity, type CollisionBox } from './scene/city';
-import { createBillboard, type BillboardRefs } from './scene/billboard';
-import { createParticles } from './scene/particles';
-import { FPSControls } from './controls/fpsControls';
+import { buildScene } from './scene/buildScene.ts';
+import { buildBillboard, type BillboardInfo } from './scene/billboard';
+import { FirstPersonControls } from './controls/fpsControls.ts';
+import createLampFlicker from "./effects/createLampFlicker.ts" ;
+import createRain from './effects/createRain.ts';
+import createHologramAds from './effects/createHologramAds.ts';
+import { buildPortfolio, createProximityChecker } from './features/portfolio';
+import { Minimap } from './features/minimap';
+import { AudioEngine } from './effects/audio';
+import createDistantSkyline from "./effects/createDistantSkyline.ts";
+// All DOM elements are now in index.html, no need to create them programmatically
 
-// ─── DOM overlays (programmatic, no HTML needed) ───
-
-function injectStyles(): void {
-    const s = document.createElement('style');
-    s.textContent = `
-    @keyframes flicker {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { overflow: hidden; background: #000; }
-    canvas { display: block; }
-  `;
-    document.head.appendChild(s);
-}
-
-function createBlocker(): HTMLDivElement {
-    const el = document.createElement('div');
-    el.innerHTML = `
-    <div style="
-      text-align:center; color:#0ff; text-transform:uppercase;
-      letter-spacing:4px; font-family:'Courier New',monospace;
-    ">
-      <h1 style="
-        font-size:2rem; margin-bottom:1rem;
-        text-shadow:0 0 20px #0ff, 0 0 40px #f0f;
-      ">[ SYSTEM ONLINE ]</h1>
-      <p style="
-        font-size:0.9rem; color:#888;
-        animation:flicker 2s infinite;
-      ">Click to jack in</p>
-    </div>
-  `;
-    Object.assign(el.style, {
-        position: 'fixed', inset: '0',
-        background: 'rgba(0,0,0,0.85)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: '100', cursor: 'pointer',
-    });
-    document.body.appendChild(el);
-    return el;
-}
-
-function createCrosshair(): HTMLDivElement {
-    const el = document.createElement('div');
-    Object.assign(el.style, {
-        position: 'fixed', top: '50%', left: '50%',
-        transform: 'translate(-50%,-50%)',
-        width: '20px', height: '20px',
-        zIndex: '50', pointerEvents: 'none', display: 'none',
-    });
-    const h = document.createElement('div');
-    Object.assign(h.style, {
-        position: 'absolute', width: '2px', height: '100%',
-        left: '50%', transform: 'translateX(-50%)',
-        background: 'rgba(0,255,255,0.5)',
-    });
-    const v = document.createElement('div');
-    Object.assign(v.style, {
-        position: 'absolute', height: '2px', width: '100%',
-        top: '50%', transform: 'translateY(-50%)',
-        background: 'rgba(0,255,255,0.5)',
-    });
-    el.appendChild(h);
-    el.appendChild(v);
-    document.body.appendChild(el);
-    return el;
-}
-
-function createBoundaryOverlay(): HTMLDivElement {
-    const el = document.createElement('div');
-    el.innerHTML = `
-    <div style="
-      border:1px solid #f0f; padding:3rem; text-align:center;
-      max-width:500px; background:rgba(20,0,30,0.9);
-      font-family:'Courier New',monospace;
-    ">
-      <h2 style="
-        color:#f0f; font-size:1.2rem; margin-bottom:1rem;
-        text-shadow:0 0 10px #f0f;
-      ">⚠ BOUNDARY REACHED</h2>
-      <p style="
-        color:#aaa; margin-bottom:1.5rem; line-height:1.6;
-        font-size:0.85rem;
-      ">To explore the full environment with dynamic lighting and infinite terrain, execute the native client.</p>
-      <a href="#" style="
-        color:#0ff; text-decoration:none; border:1px solid #0ff;
-        padding:0.5rem 1.5rem; display:inline-block; transition:all 0.3s;
-      ">Download Native Build →</a>
-    </div>
-  `;
-    Object.assign(el.style, {
-        position: 'fixed', inset: '0',
-        background: 'rgba(0,0,20,0.9)',
-        display: 'none', alignItems: 'center', justifyContent: 'center',
-        zIndex: '200',
-    });
-    document.body.appendChild(el);
-    return el;
-}
-
-// ─── Build DOM ───
-injectStyles();
-const blocker = createBlocker();
-const crosshair = createCrosshair();
-const boundaryOverlay = createBoundaryOverlay();
-
-// ─── Renderer ───
-const renderer = new THREE.WebGLRenderer({ antialias: false });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-document.body.appendChild(renderer.domElement);
-
-// ─── Scene ───
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0012);
-scene.fog = new THREE.FogExp2(0x0a0012, 0.02);
-
-// ─── Lighting ───
-// Ambient light for base illumination
-const ambientLight = new THREE.AmbientLight(0x1a1a3a, 0.4);
-scene.add(ambientLight);
-
-// Main directional light (moonlight effect)
-const moonLight = new THREE.DirectionalLight(0x6688cc, 0.5);
-moonLight.position.set(50, 80, 50);
-moonLight.castShadow = true;
-scene.add(moonLight);
-
-// Point lights for neon glow effect
-const cyanLight = new THREE.PointLight(0x00ffff, 2, 30);
-cyanLight.position.set(5, 10, -5);
-scene.add(cyanLight);
-
-const magentaLight = new THREE.PointLight(0xff00ff, 2, 30);
-magentaLight.position.set(-5, 10, 5);
-scene.add(magentaLight);
-
-// Subtle orange urban glow
-const urbanLight = new THREE.PointLight(0xff8800, 1.5, 40);
-urbanLight.position.set(0, 5, 0);
-scene.add(urbanLight);
-
-// ─── Camera ───
-const camera = new THREE.PerspectiveCamera(
-    75,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    120
-);
-camera.position.set(0, 1.7, 5);
-camera.userData.canvas = renderer.domElement;
-
-// ─── Controls ───
-const controls = new FPSControls(camera);
-
-controls.onLock = () => {
-    blocker.style.display = 'none';
-    crosshair.style.display = 'block';
-};
-controls.onUnlock = () => {
-    blocker.style.display = 'flex';
-    crosshair.style.display = 'none';
+const PROFILE: BillboardInfo = {
+    name: 'ARJUN1K',
+    age: 19,
+    college: 'COEP Tech',
+    role: 'Gamer',
+    github: 'arjun1k-dev',
 };
 
-document.addEventListener('click', () => {
-    if (!controls.isLocked) controls.requestLock();
-});
-
-boundaryOverlay.addEventListener('click', (e) => {
-    if (e.target === boundaryOverlay) {
-        boundaryOverlay.style.display = 'none';
-        boundaryShown = false;
-    }
-});
-
-// ─── Build world ───
-createFloor(scene);
-const collisionBoxes: CollisionBox[] = createCity(scene);
-const billboard: BillboardRefs = createBillboard(scene);
-const particles = createParticles(scene);
-
-// ─── Collision helper ───
-function collides(px: number, pz: number): boolean {
-    const r = PLAYER_RADIUS;
-    for (let i = 0; i < collisionBoxes.length; i++) {
-        const b = collisionBoxes[i];
-        if (
-            px + r > b.minX &&
-            px - r < b.maxX &&
-            pz + r > b.minZ &&
-            pz - r < b.maxZ
-        ) {
-            return true;
-        }
-    }
-    return false;
+interface DOMRefs {
+    app: HTMLDivElement;
+    intro: HTMLDivElement;
+    loader: HTMLDivElement;
+    crosshair: HTMLDivElement;
+    hud: HTMLDivElement;
+    hudPos: HTMLSpanElement;
+    hudSpd: HTMLSpanElement;
+    hudFps: HTMLSpanElement;
+    boundary: HTMLDivElement;
+    dismissBoundary: HTMLSpanElement;
+    audioBtn: HTMLButtonElement;
 }
 
-// ─── Loop ───
-const clock = new THREE.Clock();
-let boundaryShown = false;
-
-function animate(): void {
-    requestAnimationFrame(animate);
-
-    const delta = Math.min(clock.getDelta(), 0.05);
-    const elapsed = clock.elapsedTime;
-
-    // Billboard glitch time
-    billboard.pfpMaterial.uniforms.uTime.value = elapsed;
-    billboard.infoMaterial.uniforms.uTime.value = elapsed;
-
-    // Particle drift
-    const pArr = particles.geometry.attributes.position
-        .array as Float32Array;
-    for (let i = 1; i < pArr.length; i += 3) {
-        pArr[i] += Math.sin(elapsed + i) * 0.002;
-        if (pArr[i] > 15) pArr[i] = 0;
-    }
-    particles.geometry.attributes.position.needsUpdate = true;
-
-    // ─── Movement with collision ───
-    const prevX = camera.position.x;
-    const prevZ = camera.position.z;
-
-    controls.update(delta);
-
-    // Boundary clamp first
-    const half = CITY_SIZE / 2 - BOUNDARY_MARGIN;
-    camera.position.x = THREE.MathUtils.clamp(
-        camera.position.x,
-        -half,
-        half
-    );
-    camera.position.z = THREE.MathUtils.clamp(
-        camera.position.z,
-        -half,
-        half
-    );
-
-    // Wall-sliding collision: try full, then X-only, then Z-only
-    if (collides(camera.position.x, camera.position.z)) {
-        // Try X only
-        camera.position.z = prevZ;
-        if (collides(camera.position.x, camera.position.z)) {
-            // Try Z only
-            camera.position.x = prevX;
-            if (collides(camera.position.x, camera.position.z)) {
-                // Stuck – revert both
-                camera.position.x = prevX;
-                camera.position.z = prevZ;
-            }
-        }
-    }
-
-    camera.position.y = 1.7;
-
-    // ─── Boundary overlay trigger ───
-    const atWall =
-        Math.abs(camera.position.x) >= half - 0.1 ||
-        Math.abs(camera.position.z) >= half - 0.1;
-
-    if (atWall && !boundaryShown) {
-        boundaryShown = true;
-        setTimeout(() => {
-            if (boundaryShown) {
-                boundaryOverlay.style.display = 'flex';
-                document.exitPointerLock();
-            }
-        }, 600);
-    }
-    if (!atWall && boundaryShown) {
-        boundaryShown = false;
-        boundaryOverlay.style.display = 'none';
-    }
-
-    renderer.render(scene, camera);
+function getDOMRefs(): DOMRefs {
+    const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    return {
+        app: $<HTMLDivElement>('app'),
+        intro: $<HTMLDivElement>('intro'),
+        loader: $<HTMLDivElement>('loader'),
+        crosshair: $<HTMLDivElement>('crosshair'),
+        hud: $<HTMLDivElement>('hud'),
+        hudPos: $<HTMLSpanElement>('hud-pos'),
+        hudSpd: $<HTMLSpanElement>('hud-spd'),
+        hudFps: $<HTMLSpanElement>('hud-fps'),
+        boundary: $<HTMLDivElement>('boundary'),
+        dismissBoundary: $<HTMLSpanElement>('dismiss-boundary'),
+        audioBtn: $<HTMLButtonElement>('audio-btn'),
+    };
 }
 
-animate();
+async function main() {
+    const dom = getDOMRefs();
 
-// ─── Resize ───
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
+    // Wait for fonts before any canvas drawing (notice boards, billboard, pillars)
+    if (document.fonts && document.fonts.ready) {
+        try { await document.fonts.ready; } catch { /* ignore */ }
+    }
+
+    // --- Renderer ---
+    const renderer = new THREE.WebGLRenderer({
+        antialias: false,
+        powerPreference: 'low-power',
+        stencil: false,
+        depth: true,
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    dom.app.appendChild(renderer.domElement);
+    renderer.domElement.style.display = 'block';
+
+    // --- Scene ---
+    const sceneResult = buildScene();
+    const scene = new THREE.Scene();
+    scene.add(sceneResult.group);
+    scene.fog = sceneResult.fog;
+    scene.background = new THREE.Color(0x1a0433);
+
+    // --- Distant skyline (far ring of dark buildings for depth) ---
+    scene.add(createDistantSkyline());
+
+    // --- Rain ---
+    const rain = createRain();
+    scene.add(rain.mesh);
+
+    // --- Holographic ads (floating rotating neon signs) ---
+    const holoAds = createHologramAds();
+    scene.add(holoAds.group);
+
+    // --- Camera ---
+    const camera = new THREE.PerspectiveCamera(
+        72,
+        window.innerWidth / window.innerHeight,
+        0.05,
+        200
+    );
+
+    // --- Billboard ---
+    const billboard = await buildBillboard(PROFILE);
+    const billboardZ = -sceneResult.chunkHalf - 0.4;
+    billboard.group.position.set(0, 0, billboardZ);
+    scene.add(billboard.group);
+
+    // --- Portfolio elements (skill pillars + contact kiosk) ---
+    const portfolio = buildPortfolio();
+    scene.add(portfolio.group);
+
+    // --- Controls ---
+    const controls = new FirstPersonControls({
+        domElement: renderer.domElement,
+        camera,
+        colliders: sceneResult.colliders,
+        chunkHalf: sceneResult.chunkHalf,
+        floorY: sceneResult.floorY,
+        onBoundaryHit: () => {
+            dom.boundary.classList.add('visible');
+            if (document.pointerLockElement) document.exitPointerLock();
+        },
+    });
+
+    // Billboard collider (in world space)
+    const bCollider = {
+        min: new THREE.Vector2(
+            billboard.collider.min.x,
+            billboard.collider.min.y + billboardZ
+        ),
+        max: new THREE.Vector2(
+            billboard.collider.max.x,
+            billboard.collider.max.y + billboardZ
+        ),
+    };
+    controls.addCollider(bCollider);
+
+    // --- Lamp flicker system ---
+    const lampFlicker = createLampFlicker(sceneResult.lampHeads);
+
+    // --- Proximity checker (skill pillars + contact kiosk) ---
+    const proximity = createProximityChecker(portfolio.points);
+
+    // --- Minimap ---
+    const minimapPOIs = [
+        ...portfolio.minimapPOIs,
+        { x: 0, z: billboardZ, color: '#ff2bd6', label: 'BILLBOARD' },
+    ];
+    const minimap = new Minimap(sceneResult.chunkHalf, minimapPOIs);
+
+    // --- Audio engine ---
+    const audio = new AudioEngine();
+
+    // --- Resize ---
+    const onResize = () => {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        renderer.setSize(w, h);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+    };
+    window.addEventListener('resize', onResize);
+
+    // --- UI wiring ---
+    dom.intro.addEventListener('click', () => {
+        dom.intro.classList.add('hidden');
+        dom.crosshair.classList.add('visible');
+        dom.hud.classList.add('visible');
+        dom.audioBtn.classList.add('visible');
+        minimap.show();
+        renderer.domElement.requestPointerLock();
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+        if (!document.pointerLockElement) {
+            if (!dom.boundary.classList.contains('visible')) {
+                dom.intro.classList.remove('hidden');
+                dom.crosshair.classList.remove('visible');
+                dom.hud.classList.remove('visible');
+                dom.audioBtn.classList.remove('visible');
+                minimap.hide();
+            }
+        }
+    });
+
+    dom.dismissBoundary.addEventListener('click', () => {
+        dom.boundary.classList.remove('visible');
+        controls.resetBoundary();
+        renderer.domElement.requestPointerLock();
+    });
+
+    // Audio toggle
+    dom.audioBtn.addEventListener('click', () => {
+        const enabled = audio.toggle();
+        dom.audioBtn.textContent = enabled ? 'AUDIO: ON' : 'AUDIO: OFF';
+        dom.audioBtn.classList.toggle('on', enabled);
+    });
+
+    // Hide loader
+    dom.loader.classList.add('hidden');
+
+    // --- Animation loop ---
+    const clock = new THREE.Clock();
+    let last = 0;
+    let fpsAccum = 0;
+    let fpsFrames = 0;
+    let fpsLast = 0;
+
+    const tick = () => {
+        const t = clock.getElapsedTime();
+        const dt = Math.min(0.05, t - last);
+        last = t;
+
+        // Controls (movement + look)
+        const state = controls.update(dt);
+
+        // Effects
+        rain.update(dt);
+        lampFlicker.update(t);
+        holoAds.update(t);
+
+        // Proximity triggers (skill pillars + contact kiosk)
+        proximity.update(state.pos);
+
+        // Minimap
+        minimap.update(state.pos, controls.yaw);
+
+        // Billboard glitch shader
+        billboard.material.uniforms.uTime.value = t;
+        const glitchBase = 0.45;
+        const glitchPulse = 0.2 * (0.5 + 0.5 * Math.sin(t * 0.7));
+        billboard.material.uniforms.uGlitchStrength.value = glitchBase + glitchPulse;
+
+        // HUD (every ~100ms)
+        fpsAccum += dt;
+        fpsFrames++;
+        if (t - fpsLast > 0.1) {
+            const fps = fpsFrames / fpsAccum;
+            dom.hudFps.textContent = fps.toFixed(0);
+            dom.hudPos.textContent = `${state.pos.x.toFixed(1)},${state.pos.z.toFixed(1)}`;
+            dom.hudSpd.textContent = state.speed;
+            fpsAccum = 0;
+            fpsFrames = 0;
+            fpsLast = t;
+        }
+
+        renderer.render(scene, camera);
+        requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+}
+
+main().catch((err) => {
+    console.error('Failed to initialize:', err);
+    const loader = document.getElementById('loader');
+    if (loader) {
+        loader.innerHTML = `<div style="color:#ff2bd6;font-family:monospace;padding:2rem;">FATAL: ${String(err)}</div>`;
+    }
 });
