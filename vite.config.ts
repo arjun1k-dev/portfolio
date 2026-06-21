@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-    base: '/portfolio/',  // Replace with your repository name
-    // ... other config
+    base: '/',  // Replace with your repository name
+    build: {
+        outDir: 'dist',
+    },
 });
