@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="60" viewBox="0 0 400 60">
+    <defs>
+        <linearGradient id="text-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#00ffff" stop-opacity="1" />
+            <stop offset="25%" stop-color="#ff00ff" stop-opacity="1" />
+            <stop offset="50%" stop-color="#9d00ff" stop-opacity="1" />
+            <stop offset="75%" stop-color="#ff00ff" stop-opacity="1" />
+            <stop offset="100%" stop-color="#00ffff" stop-opacity="1" />
+        </linearGradient>
+
+        <filter id="text-glow">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
+            <feMerge>
+                <feMergeNode in="blur"/>
+                <feMergeNode in="blur"/>
+                <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+        </filter>
+    </defs>
+
+    <style>
+        @keyframes text-pulse {
+        0%, 100% { opacity: 0.8; }
+        50% { opacity: 1; }
+        }
+    </style>
+
+    <text x="200" y="35"
+          font-family="Arial, sans-serif"
+          font-size="20"
+          font-weight="bold"
+          fill="url(#text-gradient)"
+          filter="url(#text-glow)"
+          text-anchor="middle"
+          style="cursor: pointer; animation: text-pulse 1.5s ease-in-out infinite;">
+        CLICK ON IMAGE TO PLAY
+    </text>
+</svg>

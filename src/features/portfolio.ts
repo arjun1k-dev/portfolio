@@ -36,7 +36,7 @@ export interface ContactInfo {
 }
 
 export const CONTACT_INFO: ContactInfo = {
-    name: 'ARJUN!K',
+    name: 'ARJUN1K',
     age: 19,
     college: 'COEP Technological University',
     role: 'Gamer',
